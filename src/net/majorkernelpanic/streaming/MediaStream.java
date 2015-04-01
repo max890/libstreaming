@@ -25,6 +25,8 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.util.Random;
 
+import android.os.Build;
+import android.os.ParcelFileDescriptor;
 import net.majorkernelpanic.streaming.audio.AudioStream;
 import net.majorkernelpanic.streaming.rtp.AbstractPacketizer;
 import net.majorkernelpanic.streaming.video.VideoStream;
@@ -73,8 +75,12 @@ public abstract class MediaStream implements Stream {
 
 	protected MediaRecorder mMediaRecorder;
 	protected MediaCodec mMediaCodec;
-	
-	static {
+
+    protected ParcelFileDescriptor[] parcelFileDescriptors;
+    protected ParcelFileDescriptor parcelRead;
+    protected ParcelFileDescriptor parcelWrite;
+
+    static {
 		// We determine whether or not the MediaCodec API should be used
 		try {
 			Class.forName("android.media.MediaCodec");
@@ -313,6 +319,12 @@ public abstract class MediaStream implements Stream {
 		mReceiver.setSoTimeout(3000);
 		mSender = mLss.accept();
 		mSender.setSendBufferSize(500000);
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.KITKAT_WATCH) {
+            Log.e(TAG, "parcelFileDescriptors createPipe version = Lollipop");
+            parcelFileDescriptors = ParcelFileDescriptor.createPipe();
+            parcelRead = new ParcelFileDescriptor(parcelFileDescriptors[0]);
+            parcelWrite = new ParcelFileDescriptor(parcelFileDescriptors[1]);
+        }
 	}
 
 	protected void closeSockets() {
@@ -331,9 +343,23 @@ public abstract class MediaStream implements Stream {
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
+        try {
+            if (parcelRead != null) {
+                parcelRead.close();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        try {
+            if (parcelWrite != null) {
+                parcelWrite.close();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
 		mLss = null;
 		mSender = null;
 		mReceiver = null;
 	}
-	
+
 }

@@ -26,6 +26,8 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
+import android.os.Build;
+import android.os.ParcelFileDescriptor;
 import net.majorkernelpanic.streaming.MediaStream;
 import net.majorkernelpanic.streaming.Stream;
 import net.majorkernelpanic.streaming.exceptions.CameraInUseException;
@@ -355,33 +357,50 @@ public abstract class VideoStream extends MediaStream {
 			// We write the ouput of the camera in a local socket instead of a file !			
 			// This one little trick makes streaming feasible quiet simply: data from the camera
 			// can then be manipulated at the other end of the socket
-			mMediaRecorder.setOutputFile(mSender.getFileDescriptor());
+            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.KITKAT_WATCH) {
+                Log.i(TAG, "encodeWithMediaRecorder, version > Kitkat_watch, used ParcelFileDescriptor");
+                mMediaRecorder.setOutputFile(parcelWrite.getFileDescriptor());
+            } else {
+                mMediaRecorder.setOutputFile(mSender.getFileDescriptor());
+            }
 
 			mMediaRecorder.prepare();
 			mMediaRecorder.start();
 
 		} catch (Exception e) {
+            Log.e(TAG, "VideoStream: encodeWithMediaRecorder: " + e.getMessage(), e);
 			throw new ConfNotSupportedException(e.getMessage());
 		}
 
-		// This will skip the MPEG4 header if this step fails we can't stream anything :(
-		InputStream is = mReceiver.getInputStream();
-		try {
-			byte buffer[] = new byte[4];
-			// Skip all atoms preceding mdat atom
-			while (!Thread.interrupted()) {
-				while (is.read() != 'm');
-				is.read(buffer,0,3);
-				if (buffer[0] == 'd' && buffer[1] == 'a' && buffer[2] == 't') break;
-			}
-		} catch (IOException e) {
-			Log.e(TAG,"Couldn't skip mp4 header :/");
-			stop();
-			throw e;
-		}
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.KITKAT_WATCH) {
+            InputStream is = null;
+            try {
+                is = new ParcelFileDescriptor.AutoCloseInputStream(parcelRead);
+            } catch (Exception e) {
+                Log.e(TAG, "VideoStream: encodeWithMediaRecorder: InputStream: " + e.getMessage(), e);
+            }
+            mPacketizer.setInputStream(is);
+        } else {
+            // This will skip the MPEG4 header if this step fails we can't stream anything :(
+            InputStream is = mReceiver.getInputStream();
+            try {
+                byte buffer[] = new byte[4];
+                // Skip all atoms preceding mdat atom
+                while (!Thread.interrupted()) {
+                    while (is.read() != 'm');
+                    is.read(buffer,0,3);
+                    if (buffer[0] == 'd' && buffer[1] == 'a' && buffer[2] == 't') break;
+                }
+            } catch (IOException e) {
+                Log.e(TAG,"Couldn't skip mp4 header :/");
+                stop();
+                throw e;
+            }
 
-		// The packetizer encapsulates the bit stream in an RTP stream and send it over the network
-		mPacketizer.setInputStream(mReceiver.getInputStream());
+            // The packetizer encapsulates the bit stream in an RTP stream and send it over the network
+            mPacketizer.setInputStream(mReceiver.getInputStream());
+        }
+
 		mPacketizer.start();
 
 		mStreaming = true;
